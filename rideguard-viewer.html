@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RideGuard — Interactive 3D Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 700px at 30% 20%, #2a3140 0%, #12151c 60%, #0a0c10 100%);
+    color: #e8ebf2;
+  }
+  #scene { position: fixed; inset: 0; }
+  .panel {
+    position: fixed; z-index: 10;
+    background: rgba(16, 19, 26, 0.82);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    padding: 14px 18px;
+  }
+  #header { top: 18px; left: 18px; max-width: 340px; }
+  #header h1 { font-size: 19px; letter-spacing: 0.4px; }
+  #header h1 .sos { color: #ff5964; }
+  #header p { font-size: 12.5px; color: #aab3c5; margin-top: 6px; line-height: 1.5; }
+  #controls { bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; }
+  button {
+    font: inherit; font-size: 13.5px; font-weight: 600;
+    color: #e8ebf2; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
+    padding: 9px 16px; cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  button:hover { background: rgba(255,255,255,0.16); }
+  button.primary { background: #ff5964; border-color: #ff5964; color: #fff; }
+  button.primary:hover { background: #ff707a; }
+  button.active { background: rgba(255,89,100,0.25); border-color: #ff5964; }
+  label.toggle { font-size: 13px; color: #c7cddb; display: flex; gap: 6px; align-items: center; cursor: pointer; user-select: none; }
+  #hint { bottom: 18px; right: 18px; font-size: 11.5px; color: #8b94a7; }
+  .lbl {
+    font-size: 11px; font-weight: 600; color: #fff;
+    background: rgba(20, 24, 33, 0.85);
+    border: 1px solid rgba(255,89,100,0.55);
+    border-radius: 20px; padding: 3px 10px;
+    white-space: nowrap; pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  @media (max-width: 640px) { #header { max-width: 240px; } #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div class="panel" id="header">
+  <h1>Ride<span class="sos">Guard</span> · SOS device</h1>
+  <p>Fall-detection emergency module for cyclists. Detects a crash, sends <b>GPS location</b> by <b>SMS</b> over a GSM/SIM module — with a <b>cancel button</b> to abort false alerts.</p>
+</div>
+
+<div class="panel" id="controls">
+  <button id="btn-view" class="primary">Exploded view</button>
+  <button id="btn-rotate" class="active">Auto-rotate</button>
+  <button id="btn-labels" class="active">Labels</button>
+  <button id="btn-png">Save PNG</button>
+</div>
+
+<div class="panel" id="hint">drag&nbsp;·&nbsp;orbit&nbsp;&nbsp;&nbsp;scroll&nbsp;·&nbsp;zoom&nbsp;&nbsp;&nbsp;right-drag&nbsp;·&nbsp;pan</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ---------- renderer / scene / camera ----------
+const container = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+Object.assign(labelRenderer.domElement.style, { position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: 5 });
+document.body.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 1, 2000);
+camera.position.set(75, 40, 110);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.4;
+controls.target.set(0, 0, 0);
+controls.minDistance = 50; controls.maxDistance = 400;
+
+// ---------- lights ----------
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x1a1d24, 1.15));
+const key = new THREE.DirectionalLight(0xffffff, 2.1);
+key.position.set(50, 80, 60);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -120; key.shadow.camera.right = 120;
+key.shadow.camera.top = 120; key.shadow.camera.bottom = -120;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.5);
+rim.position.set(-60, 30, -70);
+scene.add(rim);
+
+// ground (catches shadow only)
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(600, 600),
+  new THREE.ShadowMaterial({ opacity: 0.35 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -34;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ---------- helpers ----------
+function label(text, x, y, z) {
+  const div = document.createElement('div');
+  div.className = 'lbl';
+  div.textContent = text;
+  const o = new CSS2DObject(div);
+  o.position.set(x, y, z);
+  return o;
+}
+const mat = (c, opts = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.15, ...opts });
+
+function canvasTexture(w, h, draw) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  draw(ctx, w, h);
+  const t = new THREE.CanvasTexture(cv);
+  t.anisotropy = 4;
+  return t;
+}
+
+const parts = []; // { mesh, base: Vector3, offset: Vector3 }
+function addPart(mesh, offset) {
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData.base = mesh.position.clone();
+  mesh.userData.offset = offset ?? new THREE.Vector3();
+  scene.add(mesh);
+  parts.push(mesh);
+  return mesh;
+}
+
+// ---------- device (mm units) ----------
+const W = 45, L = 35, T = 18, R = 8;
+const FRONT = T / 2, BACK = -T / 2;
+
+// shell
+const shell = addPart(new THREE.Mesh(
+  new RoundedBoxGeometry(W, L, T, 5, R),
+  mat(0x6a7280)
+));
+shell.add(label('Cancel button', 0, -6, FRONT + 4));
+shell.add(label('Status LED', 0, 12, FRONT + 4));
+const railLbl = label('Strap mount channel', 29, 10, 0);
+railLbl.userData.interior = false;
+shell.add(railLbl);
+
+// bezel ring + button plunger
+const bezel = new THREE.Mesh(new THREE.TorusGeometry(7.6, 1.1, 12, 40), mat(0x2c3038));
+bezel.position.set(0, -6, FRONT + 0.4);
+shell.add(bezel);
+const btn = addPart(new THREE.Mesh(
+  new THREE.CylinderGeometry(6.4, 6.4, 2.6, 36),
+  mat(0xd63442, { roughness: 0.35 })
+));
+btn.rotation.x = Math.PI / 2;
+btn.position.set(0, -6, FRONT + 1.6);
+btn.userData.offset = new THREE.Vector3(0, 0, 22);
+
+// LED
+const led = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 1.2, 16),
+  new THREE.MeshStandardMaterial({ color: 0x35e07a, emissive: 0x1fae57, emissiveIntensity: 1.6 }));
+led.rotation.x = Math.PI / 2;
+led.position.set(0, 9, FRONT + 0.2);
+shell.add(led);
+// small brand plate on the front
+const brandTex = canvasTexture(512, 96, (c, w, h) => {
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = '#e8ebf2';
+  c.font = 'bold 58px system-ui, sans-serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('RideGuard', w / 2, h / 2 + 2);
+});
+const brand = new THREE.Mesh(new THREE.PlaneGeometry(24, 4.5),
+  new THREE.MeshBasicMaterial({ map: brandTex, transparent: true }));
+brand.position.set(0, 1, FRONT + 0.15);
+shell.add(brand);
+
+// side rails + strap loop
+for (const s of [-1, 1]) {
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(3, 16, T), mat(0x565d6b));
+  rail.position.set(s * (W / 2 + 1.3 + 2.6 / 2), 0, 0);
+  shell.add(rail);
+  for (const sy of [-1, 1]) {
+    const tab = new THREE.Mesh(new THREE.BoxGeometry(3.6, 5, 8), mat(0x565d6b));
+    tab.position.set(s * (W / 2 + 1.8), sy * 5.5, 0);
+    shell.add(tab);
+  }
+}
+// strap loop: wraps through the two side rail channels
+const strap = new THREE.Mesh(
+  new THREE.TorusGeometry(25.8, 1.6, 10, 64),
+  mat(0x23272f, { roughness: 0.9 })
+);
+strap.rotation.x = Math.PI / 2;   // ring lies in the XZ plane
+strap.scale.set(1, 0.82, 1);      // flatten along world Z (local Y)
+strap.position.set(0, 0, 0);
+shell.add(strap);
+
+// interior electronics (revealed when exploded)
+const pcb = addPart(new THREE.Mesh(new THREE.BoxGeometry(36, 26, 1.6), mat(0x0e5a2f, { roughness: 0.7 })));
+pcb.position.set(0, 0, 3);
+pcb.userData.offset = new THREE.Vector3(52, 0, 4);
+const pcbLbl = label('Main PCB — fall detection', 0, -16, 0);
+pcbLbl.userData.interior = true;
+pcb.add(pcbLbl);
+
+const gsm = new THREE.Mesh(new THREE.BoxGeometry(18, 14, 2.4), mat(0x101318));
+gsm.position.set(-6, 2, 2.2);
+pcb.add(gsm);
+const gsmLbl = label('SIM800L GSM module', 0, 10, 0);
+gsmLbl.userData.interior = true;
+gsm.add(gsmLbl);
+const gps = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 1.6), mat(0xdadfe8, { roughness: 0.3 }));
+gps.position.set(10, -4, 2);
+pcb.add(gps);
+const gpsLbl = label('NEO-6M GPS antenna', 0, 8, 0);
+gpsLbl.userData.interior = true;
+gps.add(gpsLbl);
+const buzz = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 2, 20), mat(0x0a0a0a));
+buzz.rotation.x = Math.PI / 2;
+buzz.position.set(-8, -9, 2);
+pcb.add(buzz);
+const buzzLbl = label('Buzzer', 0, 6, 2);
+buzzLbl.userData.interior = true;
+buzz.add(buzzLbl);
+
+const batt = addPart(new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 3.4, 28), mat(0xb9c1cf, { metalness: 0.7, roughness: 0.3 })));
+batt.rotation.x = Math.PI / 2;
+batt.position.set(0, 0, -3);
+batt.userData.offset = new THREE.Vector3(78, 0, 4);
+const battLbl = label('CR123A battery', 0, 12, 0);
+battLbl.userData.interior = true;
+batt.add(battLbl);
+
+// back lid with printed face
+const lidTex = canvasTexture(512, 384, (c, w, h) => {
+  c.fillStyle = '#3a404d'; c.fillRect(0, 0, w, h);
+  c.strokeStyle = '#59617055'; c.lineWidth = 2;
+  c.strokeRect(10, 10, w - 20, h - 20);
+  c.fillStyle = '#e8ebf2';
+  c.font = 'bold 64px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.fillText('RideGuard', w / 2, 110);
+  c.fillStyle = '#ff5964';
+  c.font = 'bold 34px system-ui, sans-serif';
+  c.fillText('SOS  ·  GPS  ·  SIM', w / 2, 160);
+  // SIM door outline
+  c.strokeStyle = '#ffffff88'; c.lineWidth = 3;
+  c.strokeRect(w / 2 - 80, 200, 160, 110);
+  c.fillStyle = '#ffffff66';
+  c.font = 'bold 30px system-ui, sans-serif';
+  c.fillText('SIM ▲', w / 2, 260);
+  // USB-C slot
+  c.fillStyle = '#0c0e12';
+  c.fillRect(w / 2 - 40, h - 42, 80, 18);
+  // buzzer holes
+  c.fillStyle = '#15181e';
+  for (let ix = -1; ix <= 1; ix++) for (let iy = -1; iy <= 1; iy++) {
+    c.beginPath(); c.arc(w / 2 + 130 + ix * 16, 250 + iy * 16, 6, 0, 7); c.fill();
+  }
+});
+const lidMats = Array.from({ length: 6 }, () => mat(0x3a404d));
+lidMats[5] = new THREE.MeshStandardMaterial({ map: lidTex, roughness: 0.55, metalness: 0.1 });
+const lid = addPart(new THREE.Mesh(new THREE.BoxGeometry(W - 4.8, L - 4.8, 2.4), lidMats));
+lid.position.set(0, 0, BACK - 1.2);
+lid.userData.offset = new THREE.Vector3(0, 0, -26);
+const simLbl = label('SIM door', 0, -14, -3);
+simLbl.userData.interior = true;
+lid.add(simLbl);
+const usbLbl = label('USB-C charging', 0, -21, -3);
+usbLbl.userData.interior = true;
+lid.add(usbLbl);
+
+// explode slider state
+let explode = 0, explodeTarget = 0;
+
+// ---------- UI ----------
+const btnView = document.getElementById('btn-view');
+btnView.onclick = () => {
+  explodeTarget = explodeTarget === 0 ? 1 : 0;
+  btnView.textContent = explodeTarget === 0 ? 'Exploded view' : 'Assemble';
+};
+const btnRot = document.getElementById('btn-rotate');
+btnRot.onclick = () => {
+  controls.autoRotate = !controls.autoRotate;
+  btnRot.classList.toggle('active', controls.autoRotate);
+};
+const btnLbl = document.getElementById('btn-labels');
+btnLbl.onclick = () => {
+  labelsVisible = !labelsVisible;
+  btnLbl.classList.toggle('active', labelsVisible);
+};
+let labelsVisible = true;
+const btnPng = document.getElementById('btn-png');
+btnPng.onclick = () => {
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = 'rideguard-view.png';
+  a.click();
+};
+
+// ---------- loop ----------
+const clock = new THREE.Clock();
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  explode += (explodeTarget - explode) * Math.min(1, dt * 6);
+  if (Math.abs(explodeTarget - explode) < 0.001) explode = explodeTarget;
+  for (const p of parts) {
+    p.position.copy(p.userData.base).addScaledVector(p.userData.offset, explode);
+  }
+  scene.traverse(o => {
+    if (o.isCSS2DObject)
+      o.visible = labelsVisible && (!o.userData.interior || explode > 0.35);
+  });
+  // LED blink
+  led.material.emissiveIntensity = 1.1 + Math.sin(clock.elapsedTime * 4) * 0.9;
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+tick();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
